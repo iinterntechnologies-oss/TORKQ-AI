@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+:root {
+  --background: #000000;
+  --color-safe: #6DBE30;
+  --color-exposed: #FF3B4E;
+  --color-scanning: #FFB020;
+  --color-remediated: #6DBE30;
+  --color-brand-green: #6DBE30;
+  --color-brand-red: #FF3B4E;
+  --color-brand-amber: #FFB020;
+  --text-primary: #FFFFFF;
+  --text-secondary: #A3A3A3;
+}
+
+@theme {
+  --color-tork-green: var(--color-brand-green);
+  --color-tork-red: var(--color-brand-red);
+  --color-tork-amber: var(--color-brand-amber);
+  --color-tork-bg: var(--background);
+
+  /* TYPE SCALE — tracking tightens as size grows, leading loosens as size shrinks.
+     Never reuse one tracking value across sizes: large text reads too loose,
+     small text too tight. */
+  --tracking-display: -0.022em;  /* 2rem+ hero headline */
+  --tracking-heading: -0.014em;  /* section h2 */
+  --leading-display: 1.05;
+  --leading-heading: 1.15;
+  --leading-body: 1.6;
+
+  /* Entrance for surfaces that mount mid-session (report, tooltips). */
+  --animate-fade-in: fade-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #000000;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(109, 190, 48, 0.3);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(109, 190, 48, 0.6);
+}
+
+::selection {
+  background-color: rgba(109, 190, 48, 0.3);
+  color: #6DBE30;
+}
+
+/* ============================================================
+   ACCESSIBILITY PREFERENCES
+   Three independent signals, handled independently.
+   ============================================================ */
+
+/* Reduced motion: strip travel and looping oscillation, keep cross-fades.
+   Framer Motion is handled separately via <MotionConfig reducedMotion="user">,
+   and the rAF choreography checks the `reducedMotion` flag from theme-state. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+
+  /* A gentle opacity cross-fade is still permitted — it aids comprehension
+     without vestibular cost. Only the translation is dropped. */
+  [data-reveal] {
+    animation: none !important;
+    transition: opacity 200ms ease !important;
+    transform: none !important;
+  }
+}
+
+/* Reduced transparency: translucent chrome becomes frosty and solid.
+   Raise the background opacity and drop the blur entirely. */
+@media (prefers-reduced-transparency: reduce) {
+  [class*="backdrop-blur"] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  [data-material="chrome"],
+  [data-material="panel"] {
+    background-color: #0A0A0A !important;
+  }
+}
+
+/* Increased contrast: near-solid surfaces with a defined border. */
+@media (prefers-contrast: more) {
+  [data-material="chrome"],
+  [data-material="panel"] {
+    background-color: #000000 !important;
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}

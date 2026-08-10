@@ -1,0 +1,6 @@
+{
+  "name": "TorkQ",
+  "description": "TorkQ landing page with floating navigation bar, hero copy, hero data-flow diagram, details, comparison table, pricing cards, contact form, and footer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
