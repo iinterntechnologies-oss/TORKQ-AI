@@ -55,6 +55,20 @@ interface Packet {
 const TOKEN_LABELS = ['[[PII_1]]', '[[NAME_2]]', '[[CARD_3]]', '[[ID_4]]'];
 const DATA_GLYPHS = ['aX9', '8#k', '7$m', 'p9@', 'x2!', '9&q'];
 
+/**
+ * Icon centres for the two cardless nodes, in their own node-local coordinates.
+ * Each icon is drawn inside a group translated here, so the group's origin is
+ * the icon's optical centre and a plain scale() pivots on the icon instead of
+ * dragging it toward a corner.
+ *
+ * Monitor spans y -35..13 → -11. Bird spans y -46..10 → -18.
+ */
+const WORKSTATION_ICON_CY = -11;
+const TORKQ_ICON_CY = -18;
+
+/** Glow circles are drawn at this radius and scaled down to the state's size. */
+const ICON_GLOW_R = 65;
+
 export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
   ({ className = '' }, ref) => {
     const { state, accent, accentRgb, reducedMotion } = useThemeState();
@@ -204,6 +218,76 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
       };
     };
 
+    /**
+     * Workstation and TorkQ have no card, so there is no border to light and no
+     * bloom to raise. Their spotlight is carried by the icon itself: a radial
+     * glow behind it, its own opacity, and a scale step.
+     *
+     * ACTIVE wants a punch that settles rather than a step that holds, so the
+     * scale is driven from a short-lived flag and the 300ms transform
+     * transition does the settling — 1.12 on arrival, 1.05 once this clears.
+     */
+    const [iconPunch, setIconPunch] = useState<Record<'workstation' | 'torkq', boolean>>({
+      workstation: false,
+      torkq: false,
+    });
+
+    const wsState = nodeStates.workstation;
+    const tqState = nodeStates.torkq;
+    useEffect(() => {
+      const timers: number[] = [];
+      const arm = (id: 'workstation' | 'torkq', s: NodeState) => {
+        if (s !== 'ACTIVE') {
+          setIconPunch((prev) => (prev[id] ? { ...prev, [id]: false } : prev));
+          return;
+        }
+        setIconPunch((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+        timers.push(window.setTimeout(() => setIconPunch((prev) => ({ ...prev, [id]: false })), 200));
+      };
+      arm('workstation', wsState);
+      arm('torkq', tqState);
+      return () => timers.forEach((t) => clearTimeout(t));
+    }, [wsState, tqState]);
+
+    /** Icon-level equivalent of getNodeProps, for the two unboxed nodes. */
+    const getIconProps = (id: 'workstation' | 'torkq') => {
+      const nState = nodeStates[id];
+      const color = getNodeColor(id);
+      const rgb = getNodeRgb(id);
+      const base = { color, rgb, dropShadow: undefined as string | undefined };
+
+      if (nState === 'DORMANT') {
+        return { ...base, iconOpacity: 0.55, iconScale: 1, glowRadius: 0, glowOpacity: 0 };
+      }
+      if (nState === 'TARGETED') {
+        return { ...base, iconOpacity: 1, iconScale: 1.08, glowRadius: 45, glowOpacity: 0.35 };
+      }
+      if (nState === 'ACTIVE') {
+        return {
+          ...base,
+          iconOpacity: 1,
+          iconScale: iconPunch[id] ? 1.12 : 1.05,
+          glowRadius: 65,
+          glowOpacity: 0.55,
+          dropShadow: `drop-shadow(0 0 9px rgba(${rgb}, 0.85))`,
+        };
+      }
+      if (nState === 'VISITED') {
+        return { ...base, iconOpacity: 1, iconScale: 1, glowRadius: 45, glowOpacity: 0.14 };
+      }
+      // NORMAL (ambient). TorkQ was the one node lit at rest before the cards
+      // went; it keeps that by holding a faint glow, and the transform pulse
+      // brightens it where it used to thicken the border.
+      const ambientLit = id === 'torkq';
+      return {
+        ...base,
+        iconOpacity: 1,
+        iconScale: 1,
+        glowRadius: ambientLit ? 48 : 0,
+        glowOpacity: ambientLit ? (torkqPulse || torkqRhythmic ? 0.3 : 0.16) : 0,
+      };
+    };
+
     // Refs for SVG path elements
     const pathLegARef = useRef<SVGPathElement | null>(null);
     const pathLegBRef = useRef<SVGPathElement | null>(null);
@@ -220,6 +304,22 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
       workstation: nodeWorkstationRef,
       torkq: nodeTorkqRef,
       ai: nodeAiRef,
+    };
+
+    /**
+     * The cardless nodes are measured from an explicit anchor rect rather than
+     * their <g>. A group's client rect grows to cover everything inside it,
+     * including the state glow and the ACTIVE drop-shadow — measuring the group
+     * would move the payload card every time the node lit up, and by a
+     * different amount per state. The anchor is fixed geometry, so the card
+     * stays where it has always been.
+     */
+    const anchorWorkstationRef = useRef<SVGRectElement | null>(null);
+    const anchorTorkqRef = useRef<SVGRectElement | null>(null);
+
+    const anchorRefs: Partial<Record<NodeId, React.RefObject<SVGRectElement | null>>> = {
+      workstation: anchorWorkstationRef,
+      torkq: anchorTorkqRef,
     };
 
     // Active packets array ref
@@ -298,9 +398,9 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
         });
       },
       getNodePosition: (id: NodeId) => {
-        const nodeRef = nodeRefs[id];
-        if (nodeRef && nodeRef.current) {
-          const rect = nodeRef.current.getBoundingClientRect();
+        const measured = anchorRefs[id]?.current ?? nodeRefs[id]?.current ?? null;
+        if (measured) {
+          const rect = measured.getBoundingClientRect();
           return {
             x: rect.left + rect.width / 2,
             y: rect.top + rect.height / 2,
@@ -498,6 +598,10 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
     const torkqProps = getNodeProps('torkq');
     const aiProps = getNodeProps('ai');
 
+    // Cardless nodes take their spotlight from the icon, not a border.
+    const workstationIcon = getIconProps('workstation');
+    const torkqIcon = getIconProps('torkq');
+
     return (
       <div
         style={{
@@ -563,14 +667,44 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               <feGaussianBlur stdDeviation={torkqPulse || torkqRhythmic ? '16' : '10'} result="blur" />
               <feComposite in="SourceGraphic" in2="blur" operator="over" />
             </filter>
+
+            {/* Radial falloff standing in for the removed card bloom on the two
+                unboxed nodes. Colour follows node state; size and strength are
+                driven by the circle's own scale and opacity. */}
+            {(['workstation', 'torkq'] as const).map((id) => (
+              <radialGradient key={id} id={`icon-glow-${id}`}>
+                <stop offset="0%" stopColor={getNodeColor(id)} stopOpacity="0.85" />
+                <stop offset="45%" stopColor={getNodeColor(id)} stopOpacity="0.3" />
+                <stop offset="100%" stopColor={getNodeColor(id)} stopOpacity="0" />
+              </radialGradient>
+            ))}
           </defs>
 
           {/* ----------------- THREE LEGS SVG PATHS ----------------- */}
 
+          {/* ----------------------------------------------------------------
+              Leg endpoints. Prompt and AI still have cards, so those two legs
+              still stop at a card edge (180 and 790). Workstation and TorkQ do
+              not, so legs meet *inside* those icons rather than stopping at the
+              vanished card edges — A ends where B begins (360, the monitor's
+              centre) and B ends where C begins (650, just clear of the bird).
+              One continuous dashed line, split only for packet animation, with
+              both junctions covered by the icon drawn over them.
+
+              The B/C junction sits on the bird's centre rather than past it.
+              Red has to enter the gateway and green has to leave it: put the
+              junction beyond the mark and leg B's red arrowhead lands clear of
+              the bird, reading as raw data coming back out. On the centre, red
+              runs behind the left half, green leaves from the right, the
+              arrowhead is covered by the body, and the transforming packet —
+              which sits at leg C's start — pulses red to green on the mark
+              itself.
+              ---------------------------------------------------------------- */}
+
           {/* LEG A: PROMPT -> WORKSTATION (RED) */}
           <path
             ref={pathLegARef}
-            d="M 180 115 C 210 90, 260 90, 290 115"
+            d="M 180 115 C 230 90, 310 90, 360 115"
             fill="none"
             stroke="#FF3B4E"
             strokeWidth={legStates.A ? "2.5" : "1.5"}
@@ -607,7 +741,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               <>
                 <path
                   ref={pathLegBRef}
-                  d="M 430 115 C 460 90, 510 90, 540 115"
+                  d="M 360 115 C 420 90, 550 90, 610 115"
                   fill="none"
                   stroke={legBColor}
                   strokeWidth={legStates.B ? "2.5" : "1.5"}
@@ -642,7 +776,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           {/* LEG C: TORKQ -> AI MODEL (GREEN/ACCENT) */}
           <path
             ref={pathLegCRef}
-            d="M 680 115 C 710 90, 760 90, 790 115"
+            d="M 610 115 C 655 90, 745 90, 790 115"
             fill="none"
             stroke="#6DBE30"
             strokeWidth={legStates.C ? "2.5" : "1.5"}
@@ -750,44 +884,55 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
             </text>
           </g>
 
-          {/* NODE 2: WORKSTATION */}
-          <g
-            ref={nodeWorkstationRef}
-            transform={`translate(360, 125) scale(${workstationProps.scale})`}
-            style={{ opacity: workstationProps.opacity }}
-            className="transition-[opacity,transform] duration-300"
-          >
-            <rect
-              x="-70"
-              y="-60"
-              width="140"
-              height="120"
-              rx="10"
-              fill="#0A0A0A"
-              stroke={workstationProps.stroke}
-              strokeWidth={workstationProps.strokeWidth}
-              style={{ filter: workstationProps.filter }}
-              className="transition-[stroke,stroke-width] duration-300"
-            />
-            {/* Monitor / Desktop Icon */}
-            <rect
-              x="-28"
-              y="-35"
-              width="56"
-              height="38"
-              rx="3"
-              fill="none"
-              stroke={workstationProps.iconColor}
-              strokeWidth="1.5"
-              style={{ opacity: workstationProps.iconOpacity }}
-            />
-            <path
-              d="M -12 3 L 12 3 M 0 3 L 0 13 M -15 13 L 15 13"
-              stroke={workstationProps.iconColor}
-              strokeWidth="1.5"
-              style={{ opacity: workstationProps.iconOpacity }}
-            />
-            <circle cx="0" cy="-16" r="5" fill="#FF3B4E" opacity="1.0" />
+          {/* NODE 2: WORKSTATION — no card. The <g> is deliberately unscaled:
+              the icon scales on its own below, so the caption stays put and the
+              anchor box stays a fixed size for getNodePosition. */}
+          <g ref={nodeWorkstationRef} transform="translate(360, 125)">
+            {/* Anchor only — no fill, no stroke, paints nothing. It preserves
+                the footprint the payload card measures against, so removing the
+                card does not drag the card down onto the icon. */}
+            <rect ref={anchorWorkstationRef} x="-70" y="-60" width="140" height="120" fill="none" />
+
+            <g transform={`translate(0, ${WORKSTATION_ICON_CY})`}>
+              <circle
+                r={ICON_GLOW_R}
+                fill="url(#icon-glow-workstation)"
+                className="transition-[opacity,transform] duration-300"
+                style={{
+                  opacity: workstationIcon.glowOpacity,
+                  transform: `scale(${workstationIcon.glowRadius / ICON_GLOW_R})`,
+                }}
+              />
+
+              {/* Monitor / Desktop Icon — coordinates shifted up by
+                  WORKSTATION_ICON_CY so the group origin is the icon's centre
+                  and the scale below pivots there. */}
+              <g
+                className="transition-[opacity,transform,filter] duration-300"
+                style={{
+                  opacity: workstationIcon.iconOpacity,
+                  transform: `scale(${workstationIcon.iconScale})`,
+                  filter: workstationIcon.dropShadow,
+                }}
+              >
+                <rect
+                  x="-28"
+                  y="-24"
+                  width="56"
+                  height="38"
+                  rx="3"
+                  fill="none"
+                  stroke={workstationProps.iconColor}
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M -12 14 L 12 14 M 0 14 L 0 24 M -15 24 L 15 24"
+                  stroke={workstationProps.iconColor}
+                  strokeWidth="1.5"
+                />
+                <circle cx="0" cy="-5" r="5" fill="#FF3B4E" />
+              </g>
+            </g>
 
             <text
               x="0"
@@ -817,53 +962,68 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
             </text>
           </g>
 
-          {/* NODE 3: TORKQ GATEWAY (BRAND NODE) */}
-          <g
-            ref={nodeTorkqRef}
-            transform={`translate(610, 125) scale(${torkqProps.scale})`}
-            style={{ opacity: torkqProps.opacity }}
-            className="transition-[opacity,transform] duration-300"
-          >
-            <rect
-              x="-70"
-              y="-60"
-              width="140"
-              height="120"
-              rx="10"
-              fill="#0A0A0A"
-              stroke={torkqProps.stroke}
-              strokeWidth={torkqProps.strokeWidth}
-              style={{ filter: torkqProps.filter }}
-              className="transition-[stroke,stroke-width] duration-300"
-            />
+          {/* NODE 3: TORKQ GATEWAY (BRAND NODE) — no card, same structure as
+              the workstation above. */}
+          <g ref={nodeTorkqRef} transform="translate(610, 125)">
+            {/* Anchor only — paints nothing. See the workstation node. */}
+            <rect ref={anchorTorkqRef} x="-70" y="-60" width="140" height="120" fill="none" />
 
-            {/* TORKQ LOGO — a nested <svg> in the node's own user space rather
-                than a foreignObject'd <img>. /logo.svg bakes in an opaque
-                #030404 square, which read as a tile sitting on the node's
-                #0A0A0A fill; <BirdMark> is that artwork with the rect dropped,
-                so the node's own background shows through behind the bird.
+            <g transform={`translate(0, ${TORKQ_ICON_CY})`}>
+              <circle
+                r={ICON_GLOW_R}
+                fill="url(#icon-glow-torkq)"
+                className="transition-[opacity,transform] duration-300"
+                style={{
+                  opacity: torkqIcon.glowOpacity,
+                  transform: `scale(${torkqIcon.glowRadius / ICON_GLOW_R})`,
+                }}
+              />
 
-                Box is 64x56 at x=-32,y=-46: the mark's 1.135 aspect held
-                against the vertical space between the card's inner top (-58.5,
-                after the 3px stroke) and the title's cap height (~24), leaving
-                ~12 above and ~14 below. Width is deliberately not pushed
-                further — the mark is wider than it is tall, so filling the
-                card's width would drive it straight into the title.
+              {/* The mark is <BirdMark> rather than an <img> of /logo.svg,
+                  which bakes in an opaque #030404 square — that square was the
+                  tile that used to sit behind the bird. 64x56 holds the mark's
+                  1.135 aspect; y=-28 centres it on this group's origin so the
+                  scale below pivots on the bird rather than its corner.
 
-                Never tinted by state: the border and label carry red/amber, the
-                brand mark does not. */}
-            <BirdMark x="-32" y="-46" width="64" height="56" />
+                  Never tinted by state: the glow and caption carry red or
+                  amber, the brand mark stays white and green. */}
+              <g
+                className="transition-[opacity,transform,filter] duration-300"
+                style={{
+                  opacity: torkqIcon.iconOpacity,
+                  transform: `scale(${torkqIcon.iconScale})`,
+                  filter: torkqIcon.dropShadow,
+                }}
+              >
+                <BirdMark x="-32" y="-28" width="64" height="56" />
+              </g>
+            </g>
 
+            {/* Wordmark over descriptor, matching the nav lockup. Fixed
+                white/green/zinc — the state accent stops at the glow and the
+                caption below. */}
             <text
               x="0"
-              y="32"
-              fill="#FFFFFF"
-              fontSize="11"
-              fontWeight="700"
+              y="30"
+              fontSize="13"
+              fontWeight="800"
+              letterSpacing="0.14em"
               textAnchor="middle"
               style={{ opacity: torkqProps.textOpacity }}
             >
-              TorkQ Gateway
+              <tspan fill="#FFFFFF">TORK</tspan>
+              <tspan fill="#6DBE30">Q</tspan>
+            </text>
+            <text
+              x="0"
+              y="44"
+              fill="#A1A1AA"
+              fontSize="10"
+              fontWeight="400"
+              textAnchor="middle"
+              style={{ opacity: torkqProps.textOpacity }}
+            >
+              Gateway
             </text>
 
             {/* Label Below Node */}
