@@ -19,6 +19,13 @@
   --color-tork-amber: var(--color-brand-amber);
   --color-tork-bg: var(--background);
 
+  /* Display face for the largest headlines. Currently the same system stack as
+     body copy — it exists so `font-display` is a real utility with one place to
+     change if a display typeface is ever adopted, rather than a class that
+     silently generates nothing. */
+  --font-display: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, sans-serif;
+
   /* TYPE SCALE — tracking tightens as size grows, leading loosens as size shrinks.
      Never reuse one tracking value across sizes: large text reads too loose,
      small text too tight. */
