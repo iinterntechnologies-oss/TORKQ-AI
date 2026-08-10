@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { FileText, Play, Columns3, Mail, type LucideIcon } from 'lucide-react';
-import { TorkQLogo } from './torkq-logo';
+import { BirdMark } from './bird-mark';
 
 /**
  * TorkQ navigation.
@@ -136,9 +136,10 @@ export const Navbar: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5, ease: 'easeOut' }}
           >
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-[#6DBE30]/10 border border-[#6DBE30]/20 group-hover:bg-[#6DBE30]/20 transition-all duration-300">
-              <TorkQLogo size={22} showWordmark={false} />
-            </div>
+            {/* Transitions `scale`, not `transform` — Tailwind v4's scale-105
+                writes the standalone scale property, which a transform-only
+                transition would leave to snap. */}
+            <BirdMark className="h-10 w-auto transition-[scale,filter] duration-300 group-hover:scale-105 group-hover:brightness-110" />
             <span className="text-xl sm:text-2xl font-extrabold tracking-widest uppercase text-white select-none">
               TORKQ
             </span>
