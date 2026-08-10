@@ -69,6 +69,175 @@ const TORKQ_ICON_CY = -18;
 /** Glow circles are drawn at this radius and scaled down to the state's size. */
 const ICON_GLOW_R = 65;
 
+/** Node centres, in viewBox user units. */
+const NODE_X = { prompt: 110, workstation: 360, torkq: 610, ai: 860 } as const;
+const NODE_Y = 125;
+
+/** Breathing room between an element's own bounds and where a leg may reach. */
+const CONNECT_PAD = 12;
+
+/**
+ * Where each leg meets an unboxed element: the icon's vertical centre, so the
+ * line reads as attached to the monitor and the bird rather than cutting past
+ * them at an arbitrary height. The boxed nodes keep their existing 115.
+ */
+const CONNECT_Y = {
+  workstation: NODE_Y + WORKSTATION_ICON_CY,
+  torkq: NODE_Y + TORKQ_ICON_CY,
+} as const;
+
+type Pt = { x: number; y: number };
+type Rect = { x: number; y: number; w: number; h: number };
+type Cubic = [Pt, Pt, Pt, Pt];
+
+const lerpPt = (a: Pt, b: Pt, t: number): Pt => ({
+  x: a.x + (b.x - a.x) * t,
+  y: a.y + (b.y - a.y) * t,
+});
+
+const cubicAt = (c: Cubic, t: number): Pt => {
+  const mt = 1 - t;
+  const w0 = mt * mt * mt;
+  const w1 = 3 * mt * mt * t;
+  const w2 = 3 * mt * t * t;
+  const w3 = t * t * t;
+  return {
+    x: w0 * c[0].x + w1 * c[1].x + w2 * c[2].x + w3 * c[3].x,
+    y: w0 * c[0].y + w1 * c[1].y + w2 * c[2].y + w3 * c[3].y,
+  };
+};
+
+/** de Casteljau — exact split, so the trimmed curve keeps the original shape. */
+const splitCubic = (c: Cubic, t: number): [Cubic, Cubic] => {
+  const p01 = lerpPt(c[0], c[1], t);
+  const p12 = lerpPt(c[1], c[2], t);
+  const p23 = lerpPt(c[2], c[3], t);
+  const p012 = lerpPt(p01, p12, t);
+  const p123 = lerpPt(p12, p23, t);
+  const mid = lerpPt(p012, p123, t);
+  return [
+    [c[0], p01, p012, mid],
+    [mid, p123, p23, c[3]],
+  ];
+};
+
+const inRect = (p: Pt, r: Rect) =>
+  p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+
+/**
+ * First t at which the curve crosses the rect boundary, in the given direction.
+ * Coarse scan to bracket the crossing, then bisect — the curves here are
+ * monotone enough in x that one crossing is all there is, and bisection keeps
+ * it exact to well under a user unit.
+ */
+const crossingT = (c: Cubic, r: Rect, want: 'enter' | 'exit'): number | null => {
+  const STEPS = 240;
+  let prev = inRect(cubicAt(c, 0), r);
+  if (want === 'exit' && !prev) return null;
+  for (let i = 1; i <= STEPS; i++) {
+    const t = i / STEPS;
+    const now = inRect(cubicAt(c, t), r);
+    const crossed = want === 'enter' ? now && !prev : !now && prev;
+    if (crossed) {
+      let lo = (i - 1) / STEPS;
+      let hi = t;
+      for (let k = 0; k < 40; k++) {
+        const mid = (lo + hi) / 2;
+        const insideMid = inRect(cubicAt(c, mid), r);
+        const midIsPast = want === 'enter' ? insideMid : !insideMid;
+        if (midIsPast) hi = mid;
+        else lo = mid;
+      }
+      return hi;
+    }
+    prev = now;
+  }
+  return null;
+};
+
+/**
+ * Cut away whatever falls inside the connection boundary at either end. The
+ * path itself is shortened — the icon is not merely painted over the line — so
+ * anything that follows the path (packets, arrowheads) stops at the boundary
+ * too, for free.
+ */
+const trimCubic = (c: Cubic, startRect: Rect | null, endRect: Rect | null): Cubic => {
+  let cur = c;
+  if (startRect) {
+    const t = crossingT(cur, startRect, 'exit');
+    if (t !== null) cur = splitCubic(cur, t)[1];
+  }
+  if (endRect) {
+    const t = crossingT(cur, endRect, 'enter');
+    if (t !== null) cur = splitCubic(cur, t)[0];
+  }
+  return cur;
+};
+
+const cubicToPath = (c: Cubic) =>
+  `M ${c[0].x.toFixed(2)} ${c[0].y.toFixed(2)} C ${c[1].x.toFixed(2)} ${c[1].y.toFixed(2)}, ` +
+  `${c[2].x.toFixed(2)} ${c[2].y.toFixed(2)}, ${c[3].x.toFixed(2)} ${c[3].y.toFixed(2)}`;
+
+/**
+ * Untrimmed legs, drawn centre-to-edge. Each leg aims at the element's centre
+ * so that once it is cut back to the boundary the remaining tangent — and with
+ * it the arrowhead — still points at the element rather than off past it.
+ */
+const BASE_LEGS: Record<LegId, Cubic> = {
+  A: [
+    { x: 180, y: 115 },
+    { x: 232, y: 104 },
+    { x: 300, y: 114 },
+    { x: NODE_X.workstation, y: CONNECT_Y.workstation },
+  ],
+  B: [
+    { x: NODE_X.workstation, y: CONNECT_Y.workstation },
+    { x: 460, y: 114 },
+    { x: 575, y: 104 },
+    { x: NODE_X.torkq, y: CONNECT_Y.torkq },
+  ],
+  C: [
+    { x: NODE_X.torkq, y: CONNECT_Y.torkq },
+    { x: 662, y: 99 },
+    { x: 740, y: 114 },
+    { x: 790, y: 115 },
+  ],
+};
+
+/**
+ * Leg captions ride just above their line. They sit lower than they used to
+ * because the arcs are flatter: a leg has to reach the boundary already at the
+ * icon's centre height, and a cubic cannot both arch steeply and arrive level.
+ */
+const LEG_LABEL_Y = 99;
+
+/**
+ * Packet opacity along a leg, in path units rather than percentages.
+ *
+ * A badge is anchored at its centre, so one sitting exactly on the boundary
+ * still reaches half its own width back over the icon — a 44-wide token badge
+ * overhangs the 12-unit pad by 10. Percentage fades cannot fix that, because
+ * the overhang is a fixed distance and legs differ in length.
+ *
+ * So the badge is held at zero until its trailing edge has cleared the icon,
+ * and only then ramps up. Nothing is ever painted, even faintly, on top of the
+ * monitor or the bird.
+ */
+const PACKET_RAMP = 12;
+const packetFade = (dist: number, total: number, halfWidth: number) => {
+  const clear = Math.max(0, halfWidth - CONNECT_PAD);
+  const rampIn = (dist - clear) / PACKET_RAMP;
+  const rampOut = (total - dist - clear) / PACKET_RAMP;
+  return Math.max(0, Math.min(1, rampIn, rampOut));
+};
+
+/**
+ * How far along leg C the transforming packet sits. Not zero: at the boundary
+ * the badge would overhang back onto the bird, which is exactly how the token
+ * label ended up painted across the logo.
+ */
+const TRANSFORM_OFFSET = 18;
+
 export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
   ({ className = '' }, ref) => {
     const { state, accent, accentRgb, reducedMotion } = useThemeState();
@@ -322,6 +491,99 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
       torkq: anchorTorkqRef,
     };
 
+    /**
+     * Connection boundaries for the two unboxed nodes: icon plus its label
+     * block, padded. Measured rather than hard-coded because the label widths
+     * come from whatever font actually resolves, which hard-coded numbers would
+     * only guess at.
+     *
+     * Each getBBox() is taken on the element carrying the state scale, not on
+     * its parent — getBBox excludes the element's own transform, so the
+     * boundary is the icon's resting size and the legs do not twitch outward
+     * every time a node scales up.
+     */
+    const svgRef = useRef<SVGSVGElement | null>(null);
+    const wsIconRef = useRef<SVGGElement | null>(null);
+    const wsTitleRef = useRef<SVGTextElement | null>(null);
+    const tqIconRef = useRef<SVGGElement | null>(null);
+    const tqTitleRef = useRef<SVGTextElement | null>(null);
+    const tqSubtitleRef = useRef<SVGTextElement | null>(null);
+
+    const [connectBounds, setConnectBounds] = useState<{
+      workstation: Rect | null;
+      torkq: Rect | null;
+    }>({ workstation: null, torkq: null });
+
+    const measureBounds = useCallback(() => {
+      const union = (
+        parts: { el: SVGGraphicsElement | null; dy?: number }[],
+        originX: number,
+      ): Rect | null => {
+        let x0 = Infinity;
+        let y0 = Infinity;
+        let x1 = -Infinity;
+        let y1 = -Infinity;
+        for (const { el, dy = 0 } of parts) {
+          if (!el) continue;
+          let b: DOMRect;
+          try {
+            b = el.getBBox();
+          } catch {
+            continue;
+          }
+          if (!b.width && !b.height) continue;
+          x0 = Math.min(x0, b.x);
+          y0 = Math.min(y0, b.y + dy);
+          x1 = Math.max(x1, b.x + b.width);
+          y1 = Math.max(y1, b.y + b.height + dy);
+        }
+        if (!Number.isFinite(x0)) return null;
+        return {
+          x: originX + x0 - CONNECT_PAD,
+          y: NODE_Y + y0 - CONNECT_PAD,
+          w: x1 - x0 + CONNECT_PAD * 2,
+          h: y1 - y0 + CONNECT_PAD * 2,
+        };
+      };
+
+      setConnectBounds({
+        workstation: union(
+          [
+            { el: wsIconRef.current, dy: WORKSTATION_ICON_CY },
+            { el: wsTitleRef.current },
+          ],
+          NODE_X.workstation,
+        ),
+        torkq: union(
+          [
+            { el: tqIconRef.current, dy: TORKQ_ICON_CY },
+            { el: tqTitleRef.current },
+            { el: tqSubtitleRef.current },
+          ],
+          NODE_X.torkq,
+        ),
+      });
+    }, []);
+
+    useEffect(() => {
+      measureBounds();
+      // Text bboxes are font-dependent, so remeasure once webfonts settle.
+      document.fonts?.ready.then(measureBounds).catch(() => {});
+      const host = svgRef.current;
+      if (!host || typeof ResizeObserver === 'undefined') return;
+      const ro = new ResizeObserver(() => measureBounds());
+      ro.observe(host);
+      return () => ro.disconnect();
+    }, [measureBounds]);
+
+    /** Legs cut back to the boundaries. Boxed nodes pass null and keep their
+     *  existing card-edge endpoints. */
+    const legPaths = {
+      A: cubicToPath(trimCubic(BASE_LEGS.A, null, connectBounds.workstation)),
+      B: cubicToPath(trimCubic(BASE_LEGS.B, connectBounds.workstation, connectBounds.torkq)),
+      C: cubicToPath(trimCubic(BASE_LEGS.C, connectBounds.torkq, null)),
+    };
+
     // Active packets array ref
     const packetsRef = useRef<Packet[]>([]);
     // Active rendered packets state for React drawing
@@ -478,7 +740,9 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
 
               // Position fixed at start of Leg C path
               const pathC = pathLegCRef.current;
-              const pt = pathC ? pathC.getPointAtLength(0) : { x: 680, y: 115 };
+              const pt = pathC
+                ? pathC.getPointAtLength(Math.min(TRANSFORM_OFFSET, pathC.getTotalLength()))
+                : { x: 680, y: 115 };
 
               // Interpolate color smoothly from Red (#FF3B4E => 255, 59, 78) to Accent (accentRgb)
               const [tr, tg, tb] = accentRgb;
@@ -540,7 +804,15 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                 glyph: p.glyph,
                 color,
                 scale: 1.0,
-                opacity: 1.0,
+                // The path now stops at the connection boundary, so a packet
+                // reaching progress 1 is sitting right against the icon. Ease
+                // it out there, and ease the next leg's packet in off the far
+                // boundary, rather than popping either against the artwork.
+                opacity: packetFade(
+                  progress * totalLen,
+                  totalLen,
+                  (p.type === 'token' ? 44 : 24) / 2,
+                ),
               });
             }
 
@@ -612,6 +884,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
         className={`relative w-full z-10 flex items-center justify-center p-2 sm:p-4 ${className}`}
       >
         <svg
+          ref={svgRef}
           viewBox="0 0 1000 280"
           className="w-full max-w-[1000px] h-auto overflow-visible"
           aria-label="TorkQ Data Flow Diagram"
@@ -704,7 +977,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           {/* LEG A: PROMPT -> WORKSTATION (RED) */}
           <path
             ref={pathLegARef}
-            d="M 180 115 C 230 90, 310 90, 360 115"
+            d={legPaths.A}
             fill="none"
             stroke="#FF3B4E"
             strokeWidth={legStates.A ? "2.5" : "1.5"}
@@ -718,7 +991,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           />
           <text
             x="235"
-            y="90"
+            y={LEG_LABEL_Y}
             fill="#FF3B4E"
             fontSize={legStates.A ? "10" : "9"}
             fontFamily="monospace"
@@ -741,7 +1014,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               <>
                 <path
                   ref={pathLegBRef}
-                  d="M 360 115 C 420 90, 550 90, 610 115"
+                  d={legPaths.B}
                   fill="none"
                   stroke={legBColor}
                   strokeWidth={legStates.B ? "2.5" : "1.5"}
@@ -755,7 +1028,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                 />
                 <text
                   x="485"
-                  y="90"
+                  y={LEG_LABEL_Y}
                   fill={legBColor}
                   fontSize={legStates.B ? "10" : "9"}
                   fontFamily="monospace"
@@ -776,7 +1049,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           {/* LEG C: TORKQ -> AI MODEL (GREEN/ACCENT) */}
           <path
             ref={pathLegCRef}
-            d="M 610 115 C 655 90, 745 90, 790 115"
+            d={legPaths.C}
             fill="none"
             stroke="#6DBE30"
             strokeWidth={legStates.C ? "2.5" : "1.5"}
@@ -790,7 +1063,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           />
           <text
             x="735"
-            y="90"
+            y={LEG_LABEL_Y}
             fill="#6DBE30"
             fontSize={legStates.C ? "10" : "9"}
             fontFamily="monospace"
@@ -908,6 +1181,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                   WORKSTATION_ICON_CY so the group origin is the icon's centre
                   and the scale below pivots there. */}
               <g
+                ref={wsIconRef}
                 className="transition-[opacity,transform,filter] duration-300"
                 style={{
                   opacity: workstationIcon.iconOpacity,
@@ -935,6 +1209,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
             </g>
 
             <text
+              ref={wsTitleRef}
               x="0"
               y="32"
               fill="#FFFFFF"
@@ -988,6 +1263,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                   Never tinted by state: the glow and caption carry red or
                   amber, the brand mark stays white and green. */}
               <g
+                ref={tqIconRef}
                 className="transition-[opacity,transform,filter] duration-300"
                 style={{
                   opacity: torkqIcon.iconOpacity,
@@ -1003,6 +1279,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                 white/green/zinc — the state accent stops at the glow and the
                 caption below. */}
             <text
+              ref={tqTitleRef}
               x="0"
               y="30"
               fontSize="13"
@@ -1015,6 +1292,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               <tspan fill="#6DBE30">Q</tspan>
             </text>
             <text
+              ref={tqSubtitleRef}
               x="0"
               y="44"
               fill="#A1A1AA"
