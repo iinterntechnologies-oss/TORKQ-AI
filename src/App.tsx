@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef } from 'react';
 import { MotionConfig } from 'framer-motion';
 import { ThemeStateProvider, useThemeState } from './lib/theme-state';
 import { ParticleField } from './components/ui/particle-field';
@@ -38,30 +38,9 @@ const Dimmable: React.FC<{ dimmed: boolean; children: React.ReactNode }> = ({
 function MainApp() {
   const { state } = useThemeState();
   const flowDiagramRef = useRef<FlowDiagramHandle | null>(null);
-  const [activeSection, setActiveSection] = useState<string>('');
 
-  // ScrollSpy for Active Section Navigation
-  useEffect(() => {
-    const sections = ['details', 'demo', 'comparison', 'pricing', 'contact'];
-
-    const handleScroll = () => {
-      const scrollPos = window.scrollY + 250;
-      for (const sectionId of sections) {
-        const el = document.getElementById(sectionId);
-        if (el) {
-          const top = el.offsetTop;
-          const height = el.offsetHeight;
-          if (scrollPos >= top && scrollPos < top + height) {
-            setActiveSection(sectionId);
-            break;
-          }
-        }
-      }
-    };
-
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+  // Scroll-spy now lives inside <Navbar>, which tracks the active section with
+  // an IntersectionObserver instead of offsetTop arithmetic.
 
   const isScanningState = state === 'scanning';
 
@@ -75,7 +54,7 @@ function MainApp() {
 
       {/* Floating Sticky Navigation Bar */}
       <Dimmable dimmed={isScanningState}>
-        <Navbar activeSection={activeSection} />
+        <Navbar />
       </Dimmable>
 
       {/* Main Content Area */}
