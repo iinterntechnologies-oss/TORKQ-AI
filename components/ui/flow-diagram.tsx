@@ -7,6 +7,7 @@ import React, {
   useCallback,
 } from 'react';
 import { useThemeState } from '../../lib/theme-state';
+import { BirdMark } from './bird-mark';
 
 export type NodeId = 'prompt' | 'workstation' | 'torkq' | 'ai';
 export type NodeState = 'NORMAL' | 'DORMANT' | 'TARGETED' | 'ACTIVE' | 'VISITED';
@@ -836,12 +837,22 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               className="transition-[stroke,stroke-width] duration-300"
             />
 
-            {/* TORKQ LOGO */}
-            <foreignObject id="torkq-node" x="-20" y="-35" width="40" height="40">
-              <div className="w-full h-full flex items-center justify-center">
-                <img src="/logo.svg" alt="TorkQ" className="h-10 w-10 object-contain" />
-              </div>
-            </foreignObject>
+            {/* TORKQ LOGO — a nested <svg> in the node's own user space rather
+                than a foreignObject'd <img>. /logo.svg bakes in an opaque
+                #030404 square, which read as a tile sitting on the node's
+                #0A0A0A fill; <BirdMark> is that artwork with the rect dropped,
+                so the node's own background shows through behind the bird.
+
+                Box is 64x56 at x=-32,y=-46: the mark's 1.135 aspect held
+                against the vertical space between the card's inner top (-58.5,
+                after the 3px stroke) and the title's cap height (~24), leaving
+                ~12 above and ~14 below. Width is deliberately not pushed
+                further — the mark is wider than it is tall, so filling the
+                card's width would drive it straight into the title.
+
+                Never tinted by state: the border and label carry red/amber, the
+                brand mark does not. */}
+            <BirdMark x="-32" y="-46" width="64" height="56" />
 
             <text
               x="0"

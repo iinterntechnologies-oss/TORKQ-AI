@@ -10,20 +10,24 @@ import React from 'react';
  *
  * So the rect is dropped and the viewBox cropped to the mark's measured bounds
  * (x 28.7-2119.8, y 159.2-2000.5), leaving no transparent padding to offset the
- * bird from the wordmark it sits beside. Aspect is 1.135:1 — set a height and
- * let width follow.
+ * bird from whatever it sits next to. Aspect is 1.135:1 — set a height and let
+ * width follow.
+ *
+ * Props spread onto the <svg>, so it can be sized by class in HTML or by
+ * x/y/width/height as a nested <svg> inside another SVG's user space.
  *
  * Two-tone by design: white body and left wing, green right wing. The green is
- * the mark's own #4caf4c, not the UI accent #6DBE30 — the artwork owns it.
+ * the mark's own #4caf4c, not the UI accent #6DBE30 — the artwork owns it, and
+ * it stays put even where the surrounding chrome changes colour with state.
  */
-export const BirdMark: React.FC<{ className?: string }> = ({ className = '' }) => (
+export const BirdMark: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg
     viewBox="24 155 2100 1850"
-    className={className}
-    /* Decorative: the mark always sits beside the TORKQ wordmark inside an
-       already-labelled link, so naming it here would say "TorkQ" twice. */
+    /* Decorative: every placement pairs the mark with the TorkQ name in
+       adjacent text, so naming it here would say "TorkQ" twice. */
     aria-hidden="true"
     focusable="false"
+    {...props}
   >
     <g transform="translate(0,2160) scale(0.1,-0.1)">
       <path
