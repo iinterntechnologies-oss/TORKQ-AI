@@ -12,6 +12,7 @@ import { Navbar } from './components/ui/navbar';
 import { ExposureInput } from './components/ui/exposure-input';
 import { HeroSection } from './components/sections/hero';
 import { DetailsSection } from './components/sections/details';
+import { KeyFeaturesSection } from './components/sections/key-features';
 import { ComparisonSection } from './components/sections/comparison';
 import { PricingSection } from './components/sections/pricing';
 import { ContactSection } from './components/sections/contact';
@@ -87,6 +88,11 @@ function MainApp() {
         {/* DETAILS SECTION */}
         <Dimmable dimmed={isScanningState}>
           <DetailsSection />
+        </Dimmable>
+
+        {/* KEY FEATURES SECTION */}
+        <Dimmable dimmed={isScanningState}>
+          <KeyFeaturesSection />
         </Dimmable>
 
         {/* COMPARISON SECTION */}

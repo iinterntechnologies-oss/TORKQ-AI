@@ -28,6 +28,16 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'contact', href: '#contact', label: 'CONTACT', icon: Mail },
 ];
 
+/**
+ * Sections that are tracked but own no link of their own — they light the link
+ * they sit under. #key-features is a continuation of the details area, so the
+ * lamp stays on DETAILS while the visitor reads it. Without this mapping the
+ * observer would set an id matching no link and the lamp would vanish entirely.
+ */
+const SECTION_TO_LINK: Record<string, string> = {
+  'key-features': 'details',
+};
+
 /** Past this scroll offset the pill thickens its material to stay legible. */
 const SCROLL_THRESHOLD = 80;
 
@@ -62,16 +72,19 @@ export const Navbar: React.FC = () => {
   // rootMargin collapses the observer root to a thin band across the middle of
   // the viewport, so "active" means "this section is what you're looking at".
   useEffect(() => {
-    const sections = NAV_ITEMS.map((item) => document.getElementById(item.id)).filter(
-      (el): el is HTMLElement => el !== null,
-    );
+    const observedIds = [...NAV_ITEMS.map((item) => item.id), ...Object.keys(SECTION_TO_LINK)];
+    const sections = observedIds
+      .map((id) => document.getElementById(id))
+      .filter((el): el is HTMLElement => el !== null);
     if (sections.length === 0) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (Date.now() < lockUntilRef.current) return;
         for (const entry of entries) {
-          if (entry.isIntersecting) setActiveId(entry.target.id);
+          if (entry.isIntersecting) {
+            setActiveId(SECTION_TO_LINK[entry.target.id] ?? entry.target.id);
+          }
         }
       },
       { rootMargin: '-45% 0px -45% 0px', threshold: 0 },
