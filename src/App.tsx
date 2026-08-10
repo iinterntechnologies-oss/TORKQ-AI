@@ -14,7 +14,6 @@ import { HeroSection } from './components/sections/hero';
 import { DetailsSection } from './components/sections/details';
 import { KeyFeaturesSection } from './components/sections/key-features';
 import { ComparisonSection } from './components/sections/comparison';
-import { PricingSection } from './components/sections/pricing';
 import { ContactSection } from './components/sections/contact';
 import { FooterSection } from './components/sections/footer';
 
@@ -98,11 +97,6 @@ function MainApp() {
         {/* COMPARISON SECTION */}
         <Dimmable dimmed={isScanningState}>
           <ComparisonSection />
-        </Dimmable>
-
-        {/* PRICING SECTION */}
-        <Dimmable dimmed={isScanningState}>
-          <PricingSection />
         </Dimmable>
 
         {/* CONTACT SECTION */}

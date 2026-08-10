@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { FileText, Play, Columns3, Tag, Mail, type LucideIcon } from 'lucide-react';
+import { FileText, Play, Columns3, Mail, type LucideIcon } from 'lucide-react';
 import { TorkQLogo } from './torkq-logo';
 
 /**
@@ -24,7 +24,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'details', href: '#details', label: 'DETAILS', icon: FileText },
   { id: 'demo', href: '#demo', label: 'DEMO', icon: Play },
   { id: 'comparison', href: '#comparison', label: 'COMPARISON', icon: Columns3 },
-  { id: 'pricing', href: '#pricing', label: 'PRICING', icon: Tag },
   { id: 'contact', href: '#contact', label: 'CONTACT', icon: Mail },
 ];
 
