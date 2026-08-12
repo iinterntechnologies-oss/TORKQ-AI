@@ -132,10 +132,27 @@ export const ScanSequence: React.FC<ScanSequenceProps> = ({
 
   const cardTextSnippet = promptText.length > 80 ? promptText.slice(0, 80) + '...' : promptText;
 
+  /**
+   * The payload card is a viewport overlay, so it can only sit centred on a
+   * node that is at least half a card in from the edge. On a wide diagram the
+   * outer nodes are not — the AI node is about 100px from the right at 1440 —
+   * so rather than let the card hang off the screen, slide it back inside.
+   * The clamp relaxes as the card shrinks into the node at the end of the run,
+   * so it still lands centred on it.
+   */
+  const clampCardX = (x: number, cardWidth: number): number => {
+    const margin = 8;
+    const half = cardWidth / 2;
+    if (cardWidth + margin * 2 >= window.innerWidth) return x;
+    return Math.min(Math.max(x, half + margin), window.innerWidth - half - margin);
+  };
+
   // Helper to compute exact anchor position above (or below) a node
   const computeNodeAnchor = (id: NodeId): NodeAnchor => {
     const cardEl = cardRef.current;
-    const cardHeight = cardEl ? cardEl.getBoundingClientRect().height : 115;
+    const cardRect = cardEl ? cardEl.getBoundingClientRect() : null;
+    const cardHeight = cardRect ? cardRect.height : 115;
+    const cardWidth = cardRect ? cardRect.width : 420;
 
     const bounds = flowDiagramRef.current?.getNodePosition(id);
     if (!bounds || (bounds.x === 0 && bounds.y === 0)) {
@@ -160,7 +177,7 @@ export const ScanSequence: React.FC<ScanSequenceProps> = ({
       const cardBottomY = nodeTop - gap;
       const centerY = cardBottomY - cardHeight / 2;
       return {
-        centerX: bounds.x,
+        centerX: clampCardX(bounds.x, cardWidth),
         centerY,
         cardEdgeY: cardBottomY,
         nodeEdgeY: nodeTop,
@@ -170,7 +187,7 @@ export const ScanSequence: React.FC<ScanSequenceProps> = ({
       const cardTopY = nodeBottom + gap;
       const centerY = cardTopY + cardHeight / 2;
       return {
-        centerX: bounds.x,
+        centerX: clampCardX(bounds.x, cardWidth),
         centerY,
         cardEdgeY: cardTopY,
         nodeEdgeY: nodeBottom,

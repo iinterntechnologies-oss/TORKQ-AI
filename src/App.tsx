@@ -18,6 +18,18 @@ import { ContactSection } from './components/sections/contact';
 import { FooterSection } from './components/sections/footer';
 
 /**
+ * The page's content guides, in one place so the sections that share them
+ * provably share them.
+ *
+ * COLUMN is the section shell — cap plus gutter — and CONTENT the block inside
+ * it that the eye actually reads the page's width off: the chatbox card, and
+ * now the flow diagram, whose outermost nodes sit flush against it. The hero
+ * runs to the same 900 above them.
+ */
+const COLUMN = 'w-full max-w-[1100px] mx-auto px-4';
+const CONTENT = 'w-full max-w-[900px] mx-auto';
+
+/**
  * Wrapper that recedes while the scan choreography owns the screen.
  * Opacity only — no transform — so it stays compositor-cheap and reads as
  * depth rather than movement.
@@ -67,17 +79,17 @@ function MainApp() {
         {/* HERO DATA-FLOW DIAGRAM SECTION */}
         <section
           id="flow"
-          className={`relative w-full max-w-[1000px] mx-auto px-4 min-h-[220px] sm:min-h-[260px] flex items-center justify-center transition-opacity duration-500 ${
+          className={`relative ${COLUMN} min-h-[220px] sm:min-h-[260px] flex items-center justify-center transition-opacity duration-500 ${
             isScanningState ? 'z-[45] opacity-100' : 'z-10'
           }`}
         >
-          <FlowDiagram ref={flowDiagramRef} />
+          <FlowDiagram ref={flowDiagramRef} className={CONTENT} />
         </section>
 
         {/* INTERACTIVE DEMO SECTION */}
         <section
           id="demo"
-          className="w-full max-w-[1100px] mx-auto min-h-[380px] my-12 px-4 scroll-mt-28"
+          className={`${COLUMN} min-h-[380px] my-12 scroll-mt-28`}
         >
           <Dimmable dimmed={isScanningState}>
             <ExposureInput flowDiagramRef={flowDiagramRef} />

@@ -56,35 +56,112 @@ const TOKEN_LABELS = ['[[PII_1]]', '[[NAME_2]]', '[[CARD_3]]', '[[ID_4]]'];
 const DATA_GLYPHS = ['aX9', '8#k', '7$m', 'p9@', 'x2!', '9&q'];
 
 /**
- * Icon centres for the two cardless nodes, in their own node-local coordinates.
- * Each icon is drawn inside a group translated here, so the group's origin is
- * the icon's optical centre and a plain scale() pivots on the icon instead of
- * dragging it toward a corner.
+ * Where an icon sits inside a card, in node-local coordinates: above centre,
+ * clear of the title the card carries under it.
  *
- * Monitor spans y -35..13 → -11. Bird spans y -46..10 → -18.
+ * It is also the height the legs run at, so they meet all four nodes on one
+ * line. The two unboxed icons are not offset by it — they fill the node box and
+ * so are centred on it like the cards are — but the line still crosses them
+ * well inside their artwork.
  */
-const WORKSTATION_ICON_CY = -11;
-const TORKQ_ICON_CY = -18;
+const ICON_CY = -11;
 
-/** Glow circles are drawn at this radius and scaled down to the state's size. */
-const ICON_GLOW_R = 65;
+/**
+ * The shared node footprint. All four nodes occupy the same box, centred on
+ * (NODE_X[id], NODE_Y): the two boxed nodes draw it as a card, the two unboxed
+ * ones fill it with artwork. It is also the anchor rect the cardless nodes
+ * report from getNodePosition, so the payload card hangs off one geometry.
+ *
+ * It is the prompt card's own 140 x 120, which the row is now measured off:
+ * before this the two unboxed nodes carried 50-unit glyphs beside two 140-unit
+ * cards and read as two different scales.
+ */
+const NODE_W = 140;
+const NODE_H = 120;
+const NODE_HALF_W = NODE_W / 2;
+const NODE_HALF_H = NODE_H / 2;
 
-/** Node centres, in viewBox user units. */
-const NODE_X = { prompt: 110, workstation: 360, torkq: 610, ai: 860 } as const;
-const NODE_Y = 125;
+/**
+ * Icon sizes, taken from that box rather than from each other's bounding boxes.
+ *
+ * The monitor takes it whole: its old 56 x 48 outline is exactly the box's
+ * aspect, so 2.5x lands on 140 x 120 with nothing left over. The coordinates
+ * are written out at that size below rather than wrapped in a scale(), so the
+ * stroke stays independent of it — a scaled 1.5 would arrive at 3.75 and read
+ * far heavier than the card borders it now stands beside.
+ *
+ * The bird takes the same 2.5x, which leaves it the shade under the monitor it
+ * always had: 110 against 120. It is a solid two-tone mass where the monitor is
+ * an open outline, so matching their boxes makes the bird the heaviest thing in
+ * the row, not an equal.
+ */
+const MONITOR_W = NODE_W;
+const MONITOR_H = NODE_H;
+const MONITOR_STROKE = 2.5;
+const BIRD_H = 110;
+/** The mark's own aspect, cropped to its bounds — set a height, width follows. */
+const BIRD_ASPECT = 1.135;
+const BIRD_W = Number((BIRD_H * BIRD_ASPECT).toFixed(2));
+
+/**
+ * The network icon grows by spread, not by blowing the whole glyph up: node
+ * positions scale onto the baseline while the dots themselves grow only a
+ * little. Scaling it whole turned four modest nodes into four blobs and put a
+ * green hub three times the area of the monitor's red dot in the row — big
+ * enough to pull the eye on its own. Spread carries the size; the nodes stay
+ * in scale with their neighbours.
+ */
+const AI_NODE_X = 22.7;
+const AI_NODE_Y = 17;
+const AI_NODE_R = 4.2;
+const AI_HUB_R = 6.6;
+
+/**
+ * Glow circles are drawn at this radius and scaled down to the state's size.
+ * It tracks the icons: 65 was a halo around a 48-unit monitor, and would now
+ * sit inside the monitor's own outline.
+ */
+const ICON_GLOW_R = 105;
+
+/**
+ * Node centre height, in viewBox user units. Every other vertical in the
+ * diagram — leg heights, captions, the label baseline — is measured off it, so
+ * the whole row moves together if it ever needs rebalancing in the box.
+ */
+const NODE_Y = 118;
+
+/**
+ * viewBox height.
+ *
+ * The node box runs 58..178 and the name under it lands at 196, with TorkQ's
+ * second line at 210 — so the artwork occupies 58..213 and this leaves 58 units
+ * of air above and 37 below. Not symmetric on purpose: the leg captions and the
+ * packets ride above the node centre, so the visual mass sits high and the two
+ * margins read even.
+ */
+const VB_H = 250;
 
 /** Breathing room between an element's own bounds and where a leg may reach. */
 const CONNECT_PAD = 12;
 
 /**
- * Where each leg meets an unboxed element: the icon's vertical centre, so the
- * line reads as attached to the monitor and the bird rather than cutting past
- * them at an arbitrary height. The boxed nodes keep their existing 115.
+ * Leg heights. LEVEL is the icons' vertical centre, where a leg meets an
+ * unboxed element so the line reads as attached to the monitor and the bird
+ * rather than cutting past them at an arbitrary height; CARD is where the two
+ * boxed legs meet a card edge, a unit above it; ARCH is the flat rise between.
  */
-const CONNECT_Y = {
-  workstation: NODE_Y + WORKSTATION_ICON_CY,
-  torkq: NODE_Y + TORKQ_ICON_CY,
-} as const;
+const LEG_Y_LEVEL = NODE_Y + ICON_CY;
+const LEG_Y_CARD = NODE_Y - 10;
+const LEG_Y_ARCH = NODE_Y - 21;
+
+/**
+ * Node names sit on one baseline under all four nodes — 18 units below the
+ * shared box, outside it, so a card's border and an unboxed icon's artwork both
+ * clear it by the same amount. TorkQ's descriptor is the only second line.
+ */
+const LABEL_Y = NODE_HALF_H + 18;
+const LABEL_SUB_Y = LABEL_Y + 14;
+const LABEL_SIZE = 11;
 
 type Pt = { x: number; y: number };
 type Rect = { x: number; y: number; w: number; h: number };
@@ -179,29 +256,92 @@ const cubicToPath = (c: Cubic) =>
   `${c[2].x.toFixed(2)} ${c[2].y.toFixed(2)}, ${c[3].x.toFixed(2)} ${c[3].y.toFixed(2)}`;
 
 /**
- * Untrimmed legs, drawn centre-to-edge. Each leg aims at the element's centre
+ * The diagram is laid out to the content column it sits in, not to the viewport.
+ * The section around it carries the same container and padding classes as the
+ * hero and the chatbox, and the SVG fills that column exactly — so the viewBox
+ * edges *are* the page's content guides.
+ *
+ * Which is why the outer nodes start half a node in: with the four boxes spread
+ * evenly across the rest, the first and last sit flush against those guides and
+ * there is nothing outside them left to bleed past. The legs take whatever gap
+ * the spread leaves.
+ *
+ * One viewBox now serves every viewport. This used to carry two — 1000 units
+ * under 1280px, 1280 above — sized so that a diagram free to grow with the
+ * window kept its artwork in proportion. Pinned to a column of fixed width,
+ * those two would render the same 900px at two different scales and step
+ * visibly at the breakpoint.
+ */
+const VB_W = 980;
+
+const NODE_PITCH = (VB_W - NODE_W) / 3;
+
+const NODE_X: Record<NodeId, number> = {
+  prompt: NODE_HALF_W,
+  workstation: NODE_HALF_W + NODE_PITCH,
+  torkq: NODE_HALF_W + NODE_PITCH * 2,
+  ai: NODE_HALF_W + NODE_PITCH * 3,
+};
+
+/** Card edges the two boxed legs run from and to. */
+const PROMPT_EDGE_X = NODE_X.prompt + NODE_HALF_W;
+const AI_EDGE_X = NODE_X.ai - NODE_HALF_W;
+
+/**
+ * Untrimmed legs, drawn edge-to-centre. Each leg aims at the element's centre
  * so that once it is cut back to the boundary the remaining tangent — and with
  * it the arrowhead — still points at the element rather than off past it.
+ *
+ * Control points are placed at fractions of each leg's own span, so the arcs
+ * keep their shape whatever the spread works out to.
  */
-const BASE_LEGS: Record<LegId, Cubic> = {
+const legX = (from: number, to: number, t: number) => from + (to - from) * t;
+
+const LEGS: Record<LegId, Cubic> = {
   A: [
-    { x: 180, y: 115 },
-    { x: 232, y: 104 },
-    { x: 300, y: 114 },
-    { x: NODE_X.workstation, y: CONNECT_Y.workstation },
+    { x: PROMPT_EDGE_X, y: LEG_Y_CARD },
+    { x: legX(PROMPT_EDGE_X, NODE_X.workstation, 0.29), y: LEG_Y_ARCH },
+    { x: legX(PROMPT_EDGE_X, NODE_X.workstation, 0.67), y: LEG_Y_LEVEL },
+    { x: NODE_X.workstation, y: LEG_Y_LEVEL },
   ],
   B: [
-    { x: NODE_X.workstation, y: CONNECT_Y.workstation },
-    { x: 460, y: 114 },
-    { x: 575, y: 104 },
-    { x: NODE_X.torkq, y: CONNECT_Y.torkq },
+    { x: NODE_X.workstation, y: LEG_Y_LEVEL },
+    { x: legX(NODE_X.workstation, NODE_X.torkq, 0.4), y: LEG_Y_LEVEL },
+    { x: legX(NODE_X.workstation, NODE_X.torkq, 0.86), y: LEG_Y_ARCH },
+    { x: NODE_X.torkq, y: LEG_Y_LEVEL },
   ],
   C: [
-    { x: NODE_X.torkq, y: CONNECT_Y.torkq },
-    { x: 662, y: 99 },
-    { x: 740, y: 114 },
-    { x: 790, y: 115 },
+    { x: NODE_X.torkq, y: LEG_Y_LEVEL },
+    { x: legX(NODE_X.torkq, AI_EDGE_X, 0.29), y: LEG_Y_ARCH },
+    { x: legX(NODE_X.torkq, AI_EDGE_X, 0.72), y: LEG_Y_LEVEL },
+    { x: AI_EDGE_X, y: LEG_Y_CARD },
   ],
+};
+
+/**
+ * The scan pushes the diagram in while it owns the screen, as far as still
+ * fits. The fit is now just the viewport over the rendered width: the nodes end
+ * exactly at the SVG's edges, so nothing else has to be accounted for and no
+ * card can be carried off-screen.
+ */
+const MAX_SCAN_ZOOM = 1.3;
+const SCAN_ZOOM_MARGIN = 16;
+
+const useScanZoom = (svgWidthPx: number): number => {
+  const [zoom, setZoom] = useState(MAX_SCAN_ZOOM);
+
+  useEffect(() => {
+    if (!svgWidthPx) return;
+    const compute = () => {
+      const fit = (window.innerWidth - SCAN_ZOOM_MARGIN * 2) / svgWidthPx;
+      setZoom(Math.max(1, Math.min(MAX_SCAN_ZOOM, fit)));
+    };
+    compute();
+    window.addEventListener('resize', compute);
+    return () => window.removeEventListener('resize', compute);
+  }, [svgWidthPx]);
+
+  return zoom;
 };
 
 /**
@@ -209,7 +349,10 @@ const BASE_LEGS: Record<LegId, Cubic> = {
  * because the arcs are flatter: a leg has to reach the boundary already at the
  * icon's centre height, and a cubic cannot both arch steeply and arrive level.
  */
-const LEG_LABEL_Y = 99;
+const LEG_LABEL_Y = NODE_Y - 26;
+
+/** Height of the reduced-motion stand-in packets: on the line, under its caption. */
+const STATIC_PACKET_Y = NODE_Y - 22;
 
 /**
  * Packet opacity along a leg, in path units rather than percentages.
@@ -241,6 +384,11 @@ const TRANSFORM_OFFSET = 18;
 export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
   ({ className = '' }, ref) => {
     const { state, accent, accentRgb, reducedMotion } = useThemeState();
+    /** Rendered width of the SVG, i.e. of the content column. Measured, since
+     *  the column's own cap is a class on the section rather than a number
+     *  here. Feeds the scan zoom's fit. */
+    const [svgWidthPx, setSvgWidthPx] = useState(0);
+    const scanZoom = useScanZoom(svgWidthPx);
     const [manualFreeze, setManualFreeze] = useState(false);
     const [tokenIndex, setTokenIndex] = useState(0);
 
@@ -312,7 +460,6 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           iconOpacity: 0.4,
           iconColor: '#737373',
           labelColor: '#737373',
-          labelOpacity: 0.4,
           isLit: false,
         };
       }
@@ -328,7 +475,6 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           iconOpacity: 1.0,
           iconColor: stroke,
           labelColor: stroke,
-          labelOpacity: 1.0,
           isLit: true,
         };
       }
@@ -350,7 +496,6 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           iconOpacity: 1.0,
           iconColor: '#FFFFFF',
           labelColor: stroke,
-          labelOpacity: 1.0,
           isLit: true,
         };
       }
@@ -366,7 +511,6 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           iconOpacity: 0.85,
           iconColor: stroke,
           labelColor: stroke,
-          labelOpacity: 0.8,
           isLit: true,
         };
       }
@@ -381,8 +525,10 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
         textOpacity: 1.0,
         iconOpacity: 1.0,
         iconColor: '#A3A3A3',
-        labelColor: id === 'torkq' ? stroke : '#E2E8F0',
-        labelOpacity: 1.0,
+        // labelColor now drives each node's own name, which is white at rest
+        // and takes the state colour only when the node lights up. TorkQ opts
+        // out entirely — its wordmark is fixed white/green.
+        labelColor: '#FFFFFF',
         isLit: id === 'torkq',
       };
     };
@@ -429,20 +575,20 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
         return { ...base, iconOpacity: 0.55, iconScale: 1, glowRadius: 0, glowOpacity: 0 };
       }
       if (nState === 'TARGETED') {
-        return { ...base, iconOpacity: 1, iconScale: 1.08, glowRadius: 45, glowOpacity: 0.35 };
+        return { ...base, iconOpacity: 1, iconScale: 1.08, glowRadius: 76, glowOpacity: 0.35 };
       }
       if (nState === 'ACTIVE') {
         return {
           ...base,
           iconOpacity: 1,
           iconScale: iconPunch[id] ? 1.12 : 1.05,
-          glowRadius: 65,
+          glowRadius: ICON_GLOW_R,
           glowOpacity: 0.55,
-          dropShadow: `drop-shadow(0 0 9px rgba(${rgb}, 0.85))`,
+          dropShadow: `drop-shadow(0 0 12px rgba(${rgb}, 0.85))`,
         };
       }
       if (nState === 'VISITED') {
-        return { ...base, iconOpacity: 1, iconScale: 1, glowRadius: 45, glowOpacity: 0.14 };
+        return { ...base, iconOpacity: 1, iconScale: 1, glowRadius: 76, glowOpacity: 0.14 };
       }
       // NORMAL (ambient). TorkQ was the one node lit at rest before the cards
       // went; it keeps that by holding a faint glow, and the transform pulse
@@ -452,7 +598,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
         ...base,
         iconOpacity: 1,
         iconScale: 1,
-        glowRadius: ambientLit ? 48 : 0,
+        glowRadius: ambientLit ? 80 : 0,
         glowOpacity: ambientLit ? (torkqPulse || torkqRhythmic ? 0.3 : 0.16) : 0,
       };
     };
@@ -548,21 +694,20 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
 
       setConnectBounds({
         workstation: union(
-          [
-            { el: wsIconRef.current, dy: WORKSTATION_ICON_CY },
-            { el: wsTitleRef.current },
-          ],
+          [{ el: wsIconRef.current }, { el: wsTitleRef.current }],
           NODE_X.workstation,
         ),
         torkq: union(
           [
-            { el: tqIconRef.current, dy: TORKQ_ICON_CY },
+            { el: tqIconRef.current },
             { el: tqTitleRef.current },
             { el: tqSubtitleRef.current },
           ],
           NODE_X.torkq,
         ),
       });
+      const host = svgRef.current;
+      if (host) setSvgWidthPx(host.getBoundingClientRect().width);
     }, []);
 
     useEffect(() => {
@@ -578,10 +723,28 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
 
     /** Legs cut back to the boundaries. Boxed nodes pass null and keep their
      *  existing card-edge endpoints. */
+    const trimmedLegs: Record<LegId, Cubic> = {
+      A: trimCubic(LEGS.A, null, connectBounds.workstation),
+      B: trimCubic(LEGS.B, connectBounds.workstation, connectBounds.torkq),
+      C: trimCubic(LEGS.C, connectBounds.torkq, null),
+    };
+
     const legPaths = {
-      A: cubicToPath(trimCubic(BASE_LEGS.A, null, connectBounds.workstation)),
-      B: cubicToPath(trimCubic(BASE_LEGS.B, connectBounds.workstation, connectBounds.torkq)),
-      C: cubicToPath(trimCubic(BASE_LEGS.C, connectBounds.torkq, null)),
+      A: cubicToPath(trimmedLegs.A),
+      B: cubicToPath(trimmedLegs.B),
+      C: cubicToPath(trimmedLegs.C),
+    };
+
+    /**
+     * Where DATA / TOKENS sit. Taken from the middle of the *trimmed* leg, so a
+     * caption stays centred on the line the eye actually sees rather than on
+     * the untrimmed span — the two differ by the width of whatever icon and
+     * label block the leg was cut back against.
+     */
+    const legLabelX: Record<LegId, number> = {
+      A: cubicAt(trimmedLegs.A, 0.5).x,
+      B: cubicAt(trimmedLegs.B, 0.5).x,
+      C: cubicAt(trimmedLegs.C, 0.5).x,
     };
 
     // Active packets array ref
@@ -742,7 +905,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               const pathC = pathLegCRef.current;
               const pt = pathC
                 ? pathC.getPointAtLength(Math.min(TRANSFORM_OFFSET, pathC.getTotalLength()))
-                : { x: 680, y: 115 };
+                : { x: NODE_X.torkq + NODE_HALF_W, y: LEG_Y_CARD };
 
               // Interpolate color smoothly from Red (#FF3B4E => 255, 59, 78) to Accent (accentRgb)
               const [tr, tg, tb] = accentRgb;
@@ -877,16 +1040,19 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
     return (
       <div
         style={{
-          transform: isZoomed ? 'scale(1.3)' : 'scale(1)',
+          transform: isZoomed ? `scale(${scanZoom})` : 'scale(1)',
           transformOrigin: 'center center',
           transition: 'transform 400ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
-        className={`relative w-full z-10 flex items-center justify-center p-2 sm:p-4 ${className}`}
+        /* No padding of its own, and no width cap of its own: the SVG has to
+           span the content column exactly for the outer nodes to land on the
+           page's guides, so the column is set by the caller's classes. */
+        className={`relative w-full z-10 flex items-center justify-center ${className}`}
       >
         <svg
           ref={svgRef}
-          viewBox="0 0 1000 280"
-          className="w-full max-w-[1000px] h-auto overflow-visible"
+          viewBox={`0 0 ${VB_W} ${VB_H}`}
+          className="w-full h-auto overflow-visible"
           aria-label="TorkQ Data Flow Diagram"
         >
           <defs>
@@ -956,13 +1122,13 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           {/* ----------------- THREE LEGS SVG PATHS ----------------- */}
 
           {/* ----------------------------------------------------------------
-              Leg endpoints. Prompt and AI still have cards, so those two legs
-              still stop at a card edge (180 and 790). Workstation and TorkQ do
-              not, so legs meet *inside* those icons rather than stopping at the
-              vanished card edges — A ends where B begins (360, the monitor's
-              centre) and B ends where C begins (650, just clear of the bird).
-              One continuous dashed line, split only for packet animation, with
-              both junctions covered by the icon drawn over them.
+              Leg endpoints. Prompt and AI have cards, so those two legs stop at
+              a card edge. Workstation and TorkQ do not, so legs meet *inside*
+              those icons rather than at a card edge that is not there — A ends
+              where B begins, on the monitor's centre, and B ends where C
+              begins, on the bird's. One continuous dashed line, split only for
+              packet animation, with both junctions covered by the icon drawn
+              over them.
 
               The B/C junction sits on the bird's centre rather than past it.
               Red has to enter the gateway and green has to leave it: put the
@@ -990,7 +1156,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
             }}
           />
           <text
-            x="235"
+            x={legLabelX.A}
             y={LEG_LABEL_Y}
             fill="#FF3B4E"
             fontSize={legStates.A ? "10" : "9"}
@@ -1027,7 +1193,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                   }}
                 />
                 <text
-                  x="485"
+                  x={legLabelX.B}
                   y={LEG_LABEL_Y}
                   fill={legBColor}
                   fontSize={legStates.B ? "10" : "9"}
@@ -1062,7 +1228,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
             }}
           />
           <text
-            x="735"
+            x={legLabelX.C}
             y={LEG_LABEL_Y}
             fill="#6DBE30"
             fontSize={legStates.C ? "10" : "9"}
@@ -1083,15 +1249,15 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           {/* NODE 1: PROMPT */}
           <g
             ref={nodePromptRef}
-            transform={`translate(110, 125) scale(${promptProps.scale})`}
+            transform={`translate(${NODE_X.prompt}, ${NODE_Y}) scale(${promptProps.scale})`}
             style={{ opacity: promptProps.opacity }}
             className="transition-[opacity,transform] duration-300"
           >
             <rect
-              x="-70"
-              y="-60"
-              width="140"
-              height="120"
+              x={-NODE_HALF_W}
+              y={-NODE_HALF_H}
+              width={NODE_W}
+              height={NODE_H}
               rx="10"
               fill="#0A0A0A"
               stroke={promptProps.stroke}
@@ -1099,29 +1265,34 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               style={{ filter: promptProps.filter }}
               className="transition-[stroke,stroke-width] duration-300"
             />
-            {/* Header Document Icon */}
+            {/* Document Icon — 38 x 48 about (-36, ICON_CY), the same silhouette
+                as before (folded corner over a third of the width) drawn at the
+                size that reads level with the monitor. It no longer sits as a
+                header glyph over the ruled lines: at this size it is the node's
+                icon, and the name and rules move into the column beside it. */}
             <path
-              d="M -50 -40 L -35 -40 L -27 -32 L -27 -15 L -50 -15 Z"
+              d="M -55 -35 L -29 -35 L -17 -23 L -17 13 L -55 13 Z"
               fill="none"
               stroke={promptProps.iconColor}
               strokeWidth="1.5"
               style={{ opacity: promptProps.iconOpacity }}
             />
             <text
-              x="-20"
-              y="-25"
-              fill="#FFFFFF"
+              x="-9"
+              y="-20"
+              fill={promptProps.labelColor}
               fontSize="11"
               fontWeight="600"
               fontFamily="sans-serif"
+              className="transition-[fill] duration-300"
               style={{ opacity: promptProps.textOpacity }}
             >
               Prompt Doc
             </text>
 
             {/* Faint Grey Lines */}
-            <line x1="-50" y1="-3" x2="40" y2="-3" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" />
-            <line x1="-50" y1="7" x2="25" y2="7" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" />
+            <line x1="-9" y1="-8" x2="45" y2="-8" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" />
+            <line x1="-9" y1="4" x2="28" y2="4" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5" />
 
             {/* Highlighted Red Block: Sensitive Data */}
             <rect
@@ -1140,33 +1311,48 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
             <text x="-48" y="39" fill="#FF3B4E" fontSize="7.5" fontWeight="500" fontFamily="sans-serif">
               confidential info
             </text>
-
-            {/* Label Below Node */}
-            <text
-              x="0"
-              y="82"
-              fill={promptProps.labelColor}
-              fontSize="10"
-              fontFamily="monospace"
-              fontWeight="bold"
-              letterSpacing="0.1em"
-              textAnchor="middle"
-              style={{ opacity: promptProps.labelOpacity }}
-            >
-              1. PROMPT
-            </text>
           </g>
 
-          {/* NODE 2: WORKSTATION — no card. The <g> is deliberately unscaled:
-              the icon scales on its own below, so the caption stays put and the
-              anchor box stays a fixed size for getNodePosition. */}
-          <g ref={nodeWorkstationRef} transform="translate(360, 125)">
-            {/* Anchor only — no fill, no stroke, paints nothing. It preserves
-                the footprint the payload card measures against, so removing the
-                card does not drag the card down onto the icon. */}
-            <rect ref={anchorWorkstationRef} x="-70" y="-60" width="140" height="120" fill="none" />
+          {/* Its name, on the shared baseline. Deliberately a sibling of the
+              node rather than a child: the group carries the state scale, and a
+              label inside it would drop off the baseline by 10% of its own
+              offset every time the node lit up. Same for the AI node below. */}
+          <text
+            x={NODE_X.prompt}
+            y={NODE_Y + LABEL_Y}
+            fill={promptProps.labelColor}
+            fontSize={LABEL_SIZE}
+            fontWeight="600"
+            textAnchor="middle"
+            className="transition-[fill] duration-300"
+            style={{ opacity: promptProps.textOpacity }}
+          >
+            Prompt
+          </text>
 
-            <g transform={`translate(0, ${WORKSTATION_ICON_CY})`}>
+          {/* NODE 2: WORKSTATION — no card. The <g> is deliberately unscaled:
+              the icon scales on its own below, so the name stays put and the
+              anchor box stays a fixed size for getNodePosition. */}
+          <g
+            ref={nodeWorkstationRef}
+            transform={`translate(${NODE_X.workstation}, ${NODE_Y})`}
+          >
+            {/* Anchor only — no fill, no stroke, paints nothing. It is the
+                shared node box, so the payload card measures against the same
+                footprint here as it does at a card. */}
+            <rect
+              ref={anchorWorkstationRef}
+              x={-NODE_HALF_W}
+              y={-NODE_HALF_H}
+              width={NODE_W}
+              height={NODE_H}
+              fill="none"
+            />
+
+            {/* Centred on the node box, like a card — no ICON_CY offset, since
+                the icon is the whole box rather than something sitting inside
+                one above a title. */}
+            <g>
               <circle
                 r={ICON_GLOW_R}
                 fill="url(#icon-glow-workstation)"
@@ -1177,9 +1363,11 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                 }}
               />
 
-              {/* Monitor / Desktop Icon — coordinates shifted up by
-                  WORKSTATION_ICON_CY so the group origin is the icon's centre
-                  and the scale below pivots there. */}
+              {/* Monitor / Desktop Icon, at MONITOR_W x MONITOR_H — the same
+                  drawing as before with every coordinate at 2.5x, so it fills
+                  the node box instead of reading as a small glyph beside two
+                  big cards. Spans the box symmetrically about the group origin,
+                  so the state scale below pivots on its centre. */}
               <g
                 ref={wsIconRef}
                 className="transition-[opacity,transform,filter] duration-300"
@@ -1190,60 +1378,54 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                 }}
               >
                 <rect
-                  x="-28"
-                  y="-24"
-                  width="56"
-                  height="38"
-                  rx="3"
+                  x={-MONITOR_W / 2}
+                  y={-MONITOR_H / 2}
+                  width={MONITOR_W}
+                  height="95"
+                  rx="7"
                   fill="none"
                   stroke={workstationProps.iconColor}
-                  strokeWidth="1.5"
+                  strokeWidth={MONITOR_STROKE}
                 />
                 <path
-                  d="M -12 14 L 12 14 M 0 14 L 0 24 M -15 24 L 15 24"
+                  d="M -30 35 L 30 35 M 0 35 L 0 60 M -37 60 L 37 60"
                   stroke={workstationProps.iconColor}
-                  strokeWidth="1.5"
+                  strokeWidth={MONITOR_STROKE}
                 />
-                <circle cx="0" cy="-5" r="5" fill="#FF3B4E" />
+                <circle cx="0" cy="-12.5" r="11" fill="#FF3B4E" />
               </g>
             </g>
 
             <text
               ref={wsTitleRef}
               x="0"
-              y="32"
-              fill="#FFFFFF"
-              fontSize="11"
+              y={LABEL_Y}
+              fill={workstationProps.labelColor}
+              fontSize={LABEL_SIZE}
               fontWeight="600"
               textAnchor="middle"
+              className="transition-[fill] duration-300"
               style={{ opacity: workstationProps.textOpacity }}
             >
               Workstation
-            </text>
-
-            {/* Label Below Node */}
-            <text
-              x="0"
-              y="82"
-              fill={workstationProps.labelColor}
-              fontSize="10"
-              fontFamily="monospace"
-              fontWeight="bold"
-              letterSpacing="0.1em"
-              textAnchor="middle"
-              style={{ opacity: workstationProps.labelOpacity }}
-            >
-              2. WORKSTATION
             </text>
           </g>
 
           {/* NODE 3: TORKQ GATEWAY (BRAND NODE) — no card, same structure as
               the workstation above. */}
-          <g ref={nodeTorkqRef} transform="translate(610, 125)">
+          <g ref={nodeTorkqRef} transform={`translate(${NODE_X.torkq}, ${NODE_Y})`}>
             {/* Anchor only — paints nothing. See the workstation node. */}
-            <rect ref={anchorTorkqRef} x="-70" y="-60" width="140" height="120" fill="none" />
+            <rect
+              ref={anchorTorkqRef}
+              x={-NODE_HALF_W}
+              y={-NODE_HALF_H}
+              width={NODE_W}
+              height={NODE_H}
+              fill="none"
+            />
 
-            <g transform={`translate(0, ${TORKQ_ICON_CY})`}>
+            {/* Centred on the node box. See the workstation icon. */}
+            <g>
               <circle
                 r={ICON_GLOW_R}
                 fill="url(#icon-glow-torkq)"
@@ -1256,12 +1438,14 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
 
               {/* The mark is <BirdMark> rather than an <img> of /logo.svg,
                   which bakes in an opaque #030404 square — that square was the
-                  tile that used to sit behind the bird. 64x56 holds the mark's
-                  1.135 aspect; y=-28 centres it on this group's origin so the
-                  scale below pivots on the bird rather than its corner.
+                  tile that used to sit behind the bird. Drawn at BIRD_H, held
+                  under the monitor because a solid mass this wide reads
+                  heaviest at a matched box; x/y are half its size, which
+                  centres it on this group's origin so the scale below pivots on
+                  the bird rather than its corner.
 
-                  Never tinted by state: the glow and caption carry red or
-                  amber, the brand mark stays white and green. */}
+                  Never tinted by state: the glow carries red or amber, the
+                  brand mark stays white and green. */}
               <g
                 ref={tqIconRef}
                 className="transition-[opacity,transform,filter] duration-300"
@@ -1271,17 +1455,22 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
                   filter: torkqIcon.dropShadow,
                 }}
               >
-                <BirdMark x="-32" y="-28" width="64" height="56" />
+                <BirdMark
+                  x={-BIRD_W / 2}
+                  y={-BIRD_H / 2}
+                  width={BIRD_W}
+                  height={BIRD_H}
+                />
               </g>
             </g>
 
             {/* Wordmark over descriptor, matching the nav lockup. Fixed
-                white/green/zinc — the state accent stops at the glow and the
-                caption below. */}
+                white/green/zinc — alone among the four names it never takes the
+                state colour; for TorkQ the accent stops at the glow. */}
             <text
               ref={tqTitleRef}
               x="0"
-              y="30"
+              y={LABEL_Y}
               fontSize="13"
               fontWeight="800"
               letterSpacing="0.14em"
@@ -1294,7 +1483,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
             <text
               ref={tqSubtitleRef}
               x="0"
-              y="44"
+              y={LABEL_SUB_Y}
               fill="#A1A1AA"
               fontSize="10"
               fontWeight="400"
@@ -1303,35 +1492,20 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
             >
               Gateway
             </text>
-
-            {/* Label Below Node */}
-            <text
-              x="0"
-              y="82"
-              fill={torkqProps.labelColor}
-              fontSize="10"
-              fontFamily="monospace"
-              fontWeight="bold"
-              letterSpacing="0.1em"
-              textAnchor="middle"
-              style={{ opacity: torkqProps.labelOpacity }}
-            >
-              3. TORKQ
-            </text>
           </g>
 
           {/* NODE 4: AI MODEL */}
           <g
             ref={nodeAiRef}
-            transform={`translate(860, 125) scale(${aiProps.scale})`}
+            transform={`translate(${NODE_X.ai}, ${NODE_Y}) scale(${aiProps.scale})`}
             style={{ opacity: aiProps.opacity }}
             className="transition-[opacity,transform] duration-300"
           >
             <rect
-              x="-70"
-              y="-60"
-              width="140"
-              height="120"
+              x={-NODE_HALF_W}
+              y={-NODE_HALF_H}
+              width={NODE_W}
+              height={NODE_H}
               rx="10"
               fill="#0A0A0A"
               stroke={aiProps.stroke}
@@ -1339,47 +1513,63 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               style={{ filter: aiProps.filter }}
               className="transition-[stroke,stroke-width] duration-300"
             />
-            {/* Neural Network / Brain Synapses Icon */}
-            <g transform="translate(0, -12)">
-              <circle cx="-16" cy="-12" r="3.5" fill={aiProps.isLit ? '#FFFFFF' : '#A3A3A3'} />
-              <circle cx="16" cy="-12" r="3.5" fill={aiProps.isLit ? '#FFFFFF' : '#A3A3A3'} />
-              <circle cx="0" cy="0" r="5.5" fill="#6DBE30" />
-              <circle cx="-16" cy="12" r="3.5" fill={aiProps.isLit ? '#FFFFFF' : '#A3A3A3'} />
-              <circle cx="16" cy="12" r="3.5" fill={aiProps.isLit ? '#FFFFFF' : '#A3A3A3'} />
-
-              <line x1="-16" y1="-12" x2="0" y2="0" stroke={aiProps.stroke} strokeWidth="1.2" style={{ opacity: aiProps.iconOpacity }} />
-              <line x1="16" y1="-12" x2="0" y2="0" stroke={aiProps.stroke} strokeWidth="1.2" style={{ opacity: aiProps.iconOpacity }} />
-              <line x1="-16" y1="12" x2="0" y2="0" stroke={aiProps.stroke} strokeWidth="1.2" style={{ opacity: aiProps.iconOpacity }} />
-              <line x1="16" y1="12" x2="0" y2="0" stroke={aiProps.stroke} strokeWidth="1.2" style={{ opacity: aiProps.iconOpacity }} />
+            {/* Neural Network / Brain Synapses Icon — four nodes around a hub,
+                on ICON_CY like the other three. Synapse strokes are 1.5, the
+                monitor's weight, so the two outline-ish icons in the row read
+                as one family. */}
+            <g transform={`translate(0, ${ICON_CY})`}>
+              {([[-1, -1], [1, -1], [-1, 1], [1, 1]] as const).map(([sx, sy]) => (
+                <line
+                  key={`syn-${sx}-${sy}`}
+                  x1={sx * AI_NODE_X}
+                  y1={sy * AI_NODE_Y}
+                  x2="0"
+                  y2="0"
+                  stroke={aiProps.stroke}
+                  strokeWidth="1.5"
+                  style={{ opacity: aiProps.iconOpacity }}
+                />
+              ))}
+              {([[-1, -1], [1, -1], [-1, 1], [1, 1]] as const).map(([sx, sy]) => (
+                <circle
+                  key={`node-${sx}-${sy}`}
+                  cx={sx * AI_NODE_X}
+                  cy={sy * AI_NODE_Y}
+                  r={AI_NODE_R}
+                  fill={aiProps.isLit ? '#FFFFFF' : '#A3A3A3'}
+                />
+              ))}
+              <circle cx="0" cy="0" r={AI_HUB_R} fill="#6DBE30" />
             </g>
 
             <text
               x="0"
               y="32"
-              fill="#FFFFFF"
+              fill={aiProps.labelColor}
               fontSize="11"
               fontWeight="600"
               textAnchor="middle"
+              className="transition-[fill] duration-300"
               style={{ opacity: aiProps.textOpacity }}
             >
               LLM / Cloud AI
             </text>
-
-            {/* Label Below Node */}
-            <text
-              x="0"
-              y="82"
-              fill={aiProps.labelColor}
-              fontSize="10"
-              fontFamily="monospace"
-              fontWeight="bold"
-              letterSpacing="0.1em"
-              textAnchor="middle"
-              style={{ opacity: aiProps.labelOpacity }}
-            >
-              4. AI MODEL
-            </text>
           </g>
+
+          {/* Name on the shared baseline; sibling of the node for the same
+              reason as the prompt's. */}
+          <text
+            x={NODE_X.ai}
+            y={NODE_Y + LABEL_Y}
+            fill={aiProps.labelColor}
+            fontSize={LABEL_SIZE}
+            fontWeight="600"
+            textAnchor="middle"
+            className="transition-[fill] duration-300"
+            style={{ opacity: aiProps.textOpacity }}
+          >
+            LLM
+          </text>
 
           {/* ----------------- PACKET RENDERING ----------------- */}
 
@@ -1387,7 +1577,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
           {reducedMotion ? (
             <g>
               {/* Static Red Packet Leg A */}
-              <g transform="translate(235, 103)">
+              <g transform={`translate(${legLabelX.A}, ${STATIC_PACKET_Y})`}>
                 <rect x="-12" y="-6" width="24" height="12" rx="3" fill="#FF3B4E" />
                 <text x="0" y="2" fill="#FFFFFF" fontSize="7" fontFamily="monospace" textAnchor="middle">
                   aX9
@@ -1395,7 +1585,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               </g>
 
               {/* Static Red Packet Leg B */}
-              <g transform="translate(485, 103)">
+              <g transform={`translate(${legLabelX.B}, ${STATIC_PACKET_Y})`}>
                 <rect x="-12" y="-6" width="24" height="12" rx="3" fill="#FF3B4E" />
                 <text x="0" y="2" fill="#FFFFFF" fontSize="7" fontFamily="monospace" textAnchor="middle">
                   8#k
@@ -1403,7 +1593,7 @@ export const FlowDiagram = forwardRef<FlowDiagramHandle, FlowDiagramProps>(
               </g>
 
               {/* Static Green Token Leg C */}
-              <g transform="translate(735, 103)">
+              <g transform={`translate(${legLabelX.C}, ${STATIC_PACKET_Y})`}>
                 <rect x="-22" y="-7" width="44" height="14" rx="3" fill={accent} />
                 <text x="0" y="3" fill="#000000" fontSize="8" fontWeight="bold" fontFamily="monospace" textAnchor="middle">
                   [[PII_1]]
